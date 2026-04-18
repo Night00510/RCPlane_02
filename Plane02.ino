@@ -12,7 +12,7 @@
 #define INTERRUPTMPU6050_PIN 2
 
 // โครงสร้างข้อมูล (24 Bytes)
-struct mpuData {
+struct __attribute__((packed)) mpuData {
   float yaw   = 0.0f;
   float pitch = 0.0f;
   float roll  = 0.0f;
@@ -20,6 +20,15 @@ struct mpuData {
   float gy    = 0.0f;
   float gz    = 0.0f;
 };
+mpuData mpuDataToSent;
+
+struct __attribute__((packed)) joystickData {
+  uint8_t thrust = 0;
+  uint8_t yaw    = 0;
+  uint8_t pitch  = 0;
+  uint8_t roll   = 0;
+};
+joystickData joystickReceive;
 
 // DMP mpu6050
 uint8_t fifoBuffer[64];
@@ -27,12 +36,38 @@ Quaternion q;
 VectorFloat gravity;
 float ypr[3];
 MPU6050 mpu;
-mpuData mpuDataToSent;
 
 // nRF24
 RF24 radioRX(CERX, CSNRX);
 RF24 radioTX(CETX, CSNTX);
 const uint8_t pipeAddress[6] = "PLANE"; 
+
+uint32_t debugTimer = 0;
+void debug(bool txOk, bool rxOk) {
+  Serial.print(">>> TX: ");
+  if (txOk) {
+    Serial.print("SUCCESS [Gx:"); Serial.print(mpuDataToSent.gx, 3);
+    Serial.print(" GY:"); Serial.print(mpuDataToSent.gy, 3);
+    Serial.print(" GZ:"); Serial.print(mpuDataToSent.gz, 3);
+    Serial.print(" Y:"); Serial.print(mpuDataToSent.yaw, 3);
+    Serial.print(" P:"); Serial.print(mpuDataToSent.pitch, 3);
+    Serial.print(" R:"); Serial.print(mpuDataToSent.roll, 3);
+    Serial.print("]");
+  } else {
+    Serial.print("FAILED ");
+  }
+
+  Serial.print(" | <<< RX: ");
+  if (rxOk) {
+    Serial.print("RECEIVED [T:"); Serial.print(joystickReceive.thrust);
+    Serial.print(" Y:"); Serial.print(joystickReceive.yaw);
+    Serial.print(" P:"); Serial.print(joystickReceive.pitch);
+    Serial.print(" R:"); Serial.print(joystickReceive.roll);
+    Serial.println("]");
+  } else {
+    Serial.println("EMPTY");
+  }
+}
 
 volatile bool mpuInterruptFlag = false;
 void dmpDataReady() {
@@ -86,6 +121,9 @@ void setup() {
 
 void loop() {
   // ตรวจสอบ Interrupt จาก MPU6050
+  bool lastTXStatus = false;
+  bool lastRXStatus = false;
+
   if (mpuInterruptFlag) {
     mpuInterruptFlag = false;
     
@@ -104,13 +142,19 @@ void loop() {
       mpuDataToSent.gz = gravity.z;
 
       // ส่งข้อมูลทันที (ใช้เวลาประมาณ 1-2ms ที่ 250KBPS)
-      radioTX.write(&mpuDataToSent, sizeof(mpuDataToSent));
+      lastTXStatus = radioTX.write(&mpuDataToSent, sizeof(mpuDataToSent));
     }
   }
 
   // ฝั่งรับ: ถ้ามีคำสั่งจากรีโมทเข้ามา
   if (radioRX.available()) {
-    // โค้ดสำหรับรับคำสั่งเพื่อคุม Servo เครื่องบิน
-    // radioRX.read(&yourCommandStruct, sizeof(yourCommandStruct));
+    radioRX.read(&joystickReceive, sizeof(joystickReceive));
+    lastRXStatus = true;
   }
+
+  // เรียกใช้ Debug
+  // if (millis() - debugTimer > 100) { // Print ทุกๆ 100ms
+  //   debug(lastTXStatus, lastRXStatus);
+  //   debugTimer = millis();
+  // }
 }
